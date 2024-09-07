@@ -1,0 +1,116 @@
+stages:
+  - build
+  - test
+  - deploy
+
+variables:
+  AWS_ACCESS_KEY_ID: #####
+  AWS_SECRET_ACCESS_KEY: ####
+  POSTGRES_IMAGE: vsrekul/postgress
+  FLASK_IMAGE: vsrekul/flask-app
+  REACT_IMAGE: vsrekul/react-app
+  DOCKER_DRIVER: overlay2
+  KUBECONFIG: /builds/$CI_PROJECT_PATH/kubeconfig
+  DOCKER_USERNAME: vsrekul
+  DOCKER_REGISTRY_URL: https://hub.docker.com
+  DOCKER_AUTH_CONFIG: ewogICJhdXRzIjogewogICAgImh0dHBzOi8vaW5kZXguZG9ja2VyLmNvL3YxLzAiOiB7CiAgICAgICJ1c2VybmFtZSI6ICJ2c3Jla3VsIiwKICAgICAgInBhc3N3b3JkIjogIlZpamF5QDEwMDAiLAogICAgICAiYXV0aCI6ICJkbW9lYXJrYWw6VklqYXAwMDAiCn0KICB9Cn0=
+
+# Before script to setup kubectl and Docker login
+before_script:
+  - apk add --no-cache curl jq
+  - curl -LO "https://dl.k8s.io/release/v1.23.4/bin/linux/amd64/kubectl"
+  - chmod +x ./kubectl
+  - mv ./kubectl /usr/local/bin/kubectl
+  - echo "ewogICJhdXRzIjogewogICAgImh0dHBzOi8vaW5kZXguZG9ja2VyLmNvL3YxLzAiOiB7CiAgICAgICJ1c2VybmFtZSI6ICJ2c3Jla3VsIiwKICAgICAgInBhc3N3b3JkIjogIlZpamF5QDEwMDAiLAogICAgICAiYXV0aCI6ICJkbW9lYXJrYWw6VklqYXAwMDAiCn0KICB9Cn0=" > ~/.docker/config.json
+
+# Set up Docker login
+variables:
+  DOCKER_AUTH_CONFIG: $DOCKER_AUTH_CONFIG
+
+# Build Flask application
+build_flask:
+  stage: build
+  image: docker:20.10-dind
+  services:
+    - docker:dind
+  script:
+    - docker login -u "$DOCKER_USERNAME" -p "$DOCKER_PASSWORD" $DOCKER_REGISTRY_URL
+    - docker build -t $FLASK_IMAGE:latest -f backend/Dockerfile backend
+    - docker push $FLASK_IMAGE:latest
+
+# Build React application
+build_react:
+  stage: build
+  image: node:16
+  script:
+    - cd frontend
+    - npm install
+    - npm run build
+    - docker build -t $REACT_IMAGE:latest -f Dockerfile .
+    - docker login -u "$DOCKER_USERNAME" -p "$DOCKER_PASSWORD" $DOCKER_REGISTRY_URL
+    - docker push $REACT_IMAGE:latest
+
+# Test Flask application
+test_flask:
+  stage: test
+  image: python:3.9
+  script:
+    - cd backend
+    - pip install -r requirements.txt
+    - pytest
+
+# Build PostgreSQL image (if needed)
+build_db_postg:
+  stage: build
+  image: docker:20.10-dind
+  services:
+    - docker:dind
+  script:
+    - docker login -u "$DOCKER_USERNAME" -p "$DOCKER_PASSWORD" $DOCKER_REGISTRY_URL
+    - docker build -t $POSTGRES_IMAGE:latest -f k8s/Dockerfile .
+    - docker push $POSTGRES_IMAGE:latest
+
+# Deploy PostgreSQL
+deploy_postgres:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  before_script:
+    - aws configure set region us-east-1 aws_access_key_id $AWS_ACCESS_KEY_ID aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+    - aws eks --region $AWS_REGION update-kubeconfig --name $EKS_CLUSTER_NAME
+  script:
+    - kubectl apply -f k8s/postgres-deployment.yaml
+
+# Deploy Flask application
+deploy_flask:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  before_script:
+    - aws eks --region $AWS_REGION update-kubeconfig --name $EKS_CLUSTER_NAME
+  script:
+    - kubectl apply -f k8s/flask-deployment.yaml
+
+# Deploy React application
+deploy_react:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  before_script:
+    - aws eks --region $AWS_REGION update-kubeconfig --name $EKS_CLUSTER_NAME
+  script:
+    - kubectl apply -f k8s/react-deployment.yaml
+
+# Ensure all deployments are applied in the correct order
+deploy:
+  stage: deploy
+  needs:
+    - build_flask
+    - build_react
+  script:
+    - kubectl apply -f k8s/dockerhub-secret.yaml
+    - kubectl apply -f k8s/secret.yaml
+    - kubectl apply -f k8s/postgres-deployment.yaml
+    - kubectl apply -f k8s/flask-deployment.yaml
+    - kubectl apply -f k8s/react-deployment.yaml
+  environment:
+    name: production
+  only:
+    - master
