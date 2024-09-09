@@ -1,0 +1,58 @@
+#https://8grams.medium.com/how-to-setup-gitlab-runner-on-kubernetes-cluster-e4caf688ca89
+gitlabUrl: https://gitlab.com
+
+runnerRegistrationToken: "GR1348941zvM4y_Zzi2CY7sUnP_Xp"
+
+concurrent: 10
+
+checkInterval: 30
+
+rbac:
+  create: true
+  rules:
+    - apiGroups: [""]
+      resources: ["pods"]
+      verbs: ["list", "get", "watch", "create", "delete"]
+    - apiGroups: [""]
+      resources: ["pods/exec"]
+      verbs: ["create"]
+    - apiGroups: [""]
+      resources: ["pods/log"]
+      verbs: ["get"]
+    - apiGroups: [""]
+      resources: ["pods/attach"]
+      verbs: ["list", "get", "create", "delete", "update"]
+    - apiGroups: [""]
+      resources: ["secrets"]
+      verbs: ["list", "get", "create", "delete", "update"]      
+    - apiGroups: [""]
+      resources: ["configmaps"]
+      verbs: ["list", "get", "create", "delete", "update"]     
+hpa:
+  enabled: true  # Set this to true to enable HPA configuration
+  minReplicas: 2  # Minimum number of replicas for the Deployment
+  maxReplicas: 5  # Maximum number of replicas for the Deployment
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 85
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 85
+
+runners:
+  privileged: true
+  
+  config: |
+    [[runners]]
+      [runners.kubernetes]
+        namespace = "gitlab"
+        tls_verify = false
+        image = "docker:19"
+        privileged = true
