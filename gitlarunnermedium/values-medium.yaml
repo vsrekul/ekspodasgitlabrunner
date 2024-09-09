@@ -1,4 +1,5 @@
-Note:
+#Note:
+# helm install release-name ./gitlab-runner -f values-medium.yaml
 # use this file with the gitlab-runner helm chart to install and run the k8s pod as a gitlab-runner. below is ref.
 #https://8grams.medium.com/how-to-setup-gitlab-runner-on-kubernetes-cluster-e4caf688ca89
 gitlabUrl: https://gitlab.com
